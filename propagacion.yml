@@ -1,0 +1,60 @@
+# Genera cada día el GIF de propagación en 11 m y lo publica en GitHub Pages.
+name: Propagación 11 m
+
+on:
+  schedule:
+    - cron: "30 2 * * *"        # todos los días a las 02:30 UTC
+  workflow_dispatch:             # botón "Run workflow" para ejecutarlo a mano
+    inputs:
+      modo:
+        description: "completo = 48 h reales · rapido = 3 h reales · validar = 1 mapa para comparar · demo = datos falsos"
+        type: choice
+        default: completo
+        options: [completo, rapido, validar, demo]
+
+permissions:
+  contents: write
+
+jobs:
+  generar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      MODO: ${{ github.event.inputs.modo || 'completo' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgeos-dev libproj-dev
+          pip install numpy scipy matplotlib pillow cartopy
+          git clone --depth 1 https://github.com/skyelaird/dvoacap-python.git dvoacap-python
+          if [ -f dvoacap-python/requirements.txt ]; then pip install -r dvoacap-python/requirements.txt; fi
+
+      - name: Generar mapas y GIF
+        run: |
+          if [ "$MODO" = "completo" ]; then export PROP_SALIDA=web; else export PROP_SALIDA=web_prueba; fi
+          case "$MODO" in rapido) A="--rapido";; validar) A="--validar";; demo) A="--demo";; *) A="";; esac
+          python generar_propagacion.py $A
+
+      - name: Publicar (ejecución completa)
+        if: env.MODO == 'completo'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./web
+          force_orphan: true           # una sola versión en la rama: el repositorio no crece cada día
+
+      - name: Publicar (pruebas, en la subcarpeta /prueba)
+        if: env.MODO != 'completo'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./web_prueba
+          destination_dir: prueba
+          keep_files: true
